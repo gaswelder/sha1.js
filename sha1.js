@@ -3,48 +3,58 @@ const wordSizeBytes = 4;
 
 function sha1(message) {
   const stream = padMessage(bytes(message));
-  if (stream.length % blockSizeBytes != 0) {
-    throw new Error("stream size is not a multiple of the block size");
-  }
 
   // SHA1 checksum is a sequence of 5 words. The algorithm starts
   // with 5 predefined words and then updates them using bits from the
   // input blocks.
-  const init = [0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476, 0xc3d2e1f0];
-  return digest(blocks(stream), init).map(n => n.toString(16));
+  let hash = [0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476, 0xc3d2e1f0];
+  for (const block of blocks(stream)) {
+    hash = digest(block, hash);
+  }
+  return hash.map(n => n.toString(16));
 }
 
 // Produces list of bytes from the given input.
-function bytes(input) {
+function* bytes(input) {
   if (typeof input == "string") {
-    return input.split("").map(c => c.charCodeAt(0));
+    for (const c of input.split("")) {
+      yield c.charCodeAt(0);
+    }
+    return;
   }
   throw new Error("unsupported input type: " + typeof input);
 }
 
 // Parses the bytes list into a list of 16-word blocks.
-function blocks(stream) {
-  if (stream.length == 0) return [];
-  if (stream.length < blockSizeBytes) {
+function* blocks(stream) {
+  let buf = [];
+  for (const byte of stream) {
+    buf.push(byte);
+    if (buf.length == blockSizeBytes) {
+      yield words(buf);
+      buf = [];
+    }
+  }
+  if (buf.length != 0) {
     throw new Error("incomplete block at the end of stream");
   }
-  return [words(stream.slice(0, blockSizeBytes))].concat(
-    blocks(stream.slice(blockSizeBytes))
-  );
 }
 
 // Pads the message to ensure that the total length is a multiple of 64 bytes.
 // | message | eof | zeros | length |
-function padMessage(message) {
-  return addLength(addZeros(addEof(message), message.length), message.length);
-}
-
-function addEof(message) {
+function* padMessage(message) {
+  let length = 0;
+  for (const byte of message) {
+    length++;
+    yield byte;
+  }
   // 'eof' byte is a bit '1' followed by seven zero bits.
-  return message.concat([128]);
+  yield 128;
+  yield* addZeros(length);
+  yield* addLength(length);
 }
 
-function addZeros(stream, length) {
+function* addZeros(length) {
   // add 'z' zero bytes.
   //
   // The number of zeros 'z' is such that the whole stream (including the 8-byte
@@ -55,16 +65,20 @@ function addZeros(stream, length) {
 
   const n = Math.ceil((length + 9) / blockSizeBytes);
   const z = blockSizeBytes * n - 9 - length;
-  return stream.concat(Array(z).fill(0));
+  for (let i = 0; i < z; i++) {
+    yield 0;
+  }
 }
 
-function addLength(stream, length) {
+function* addLength(length) {
   // 'length' is a 64-bit encoding of length of the message in bits.
   const seq = distribute(length * 8)
     .concat(Array(8).fill(0))
     .slice(0, 8)
     .reverse();
-  return stream.concat(seq);
+  for (const byte of seq) {
+    yield byte;
+  }
 }
 
 // Returns length representation as a sequence of bytes,
@@ -87,15 +101,10 @@ function words(stream) {
   return [word].concat(words(stream.slice(wordSizeBytes)));
 }
 
-function digest(blocks, sum) {
-  if (blocks.length == 0) return sum;
-
-  const [block, ...rest] = blocks;
-  if (block.length != 16) {
-    throw new Error("invalid block size: " + block.length);
+function digest(block, sum) {
+  if (block.length != blockSizeBytes / wordSizeBytes) {
+    throw new Error("incorrect block size: " + block.length);
   }
-  block.forEach(checkUint32);
-
   const W = [];
   for (let t = 0; t < 16; t++) {
     W[t] = block[t];
@@ -116,8 +125,7 @@ function digest(blocks, sum) {
     a = T;
     checkUint32(c);
   }
-
-  return digest(rest, addVec(sum, [a, b, c, d, e]));
+  return addVec(sum, [a, b, c, d, e]);
 }
 
 function addVec(xs, ys) {
@@ -176,8 +184,8 @@ function ROTL(times, value) {
 }
 
 const table = [
-  ["", "da39a3ee 5e6b4b0d 3255bfef 95601890 afd80709"],
   ["abc", "a9993e36 4706816a ba3e2571 7850c26c 9cd0d89d"],
+  ["", "da39a3ee 5e6b4b0d 3255bfef 95601890 afd80709"],
   [
     "abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq",
     "84983e44 1c3bd26e baae4aa1 f95129e5 e54670f1"
@@ -185,13 +193,13 @@ const table = [
   [
     "abcdefghbcdefghicdefghijdefghijkefghijklfghijklmghijklmnhijklmnoijklmnopjklmnopqklmnopqrlmnopqrsmnopqrstnopqrstu",
     "a49b2446 a02c645b f419f995 b6709125 3a04a259"
+  ],
+  [
+    Array(1000000)
+      .fill("a")
+      .join(""),
+    "34aa973c d4c4daa4 f61eeb2b dbad2731 6534016f"
   ]
-  // [
-  //   Array(1000000)
-  //     .fill("a")
-  //     .join(""),
-  //   "34aa973c d4c4daa4 f61eeb2b dbad2731 6534016f"
-  // ]
 ];
 
 function check() {
@@ -209,7 +217,7 @@ function run() {
 }
 
 function time(func) {
-  const n = 1000;
+  const n = 100;
   const t = Date.now();
   Array(n)
     .fill(0)
