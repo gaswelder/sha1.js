@@ -127,18 +127,9 @@ function addVec(xs, ys) {
   return [uint32(x + y), ...addVec(restx, resty)];
 }
 
-function modulo(a, b) {
-  return a - Math.floor(a / b) * b;
-}
-function ToUint32(x) {
-  return modulo(x, Math.pow(2, 32));
-}
-
 function uint32(v) {
-  return ToUint32(v);
-  const max = 0xffffffff;
+  const max = 0xffffffff + 1;
   if (v < 0) {
-    console.log("bam!");
     return uint32(v + max);
   }
   return v % max;
@@ -202,7 +193,29 @@ const table = [
   //   "34aa973c d4c4daa4 f61eeb2b dbad2731 6534016f"
   // ]
 ];
-for (const r of table) {
-  console.log(sha1(r[0]), r[1]);
+
+function check() {
+  return table
+    .map(function([val, hash]) {
+      const got = sha1(val).join(" ");
+      console.log(got == hash, got, hash);
+      return got == hash;
+    })
+    .reduce((r, i) => r && i, true);
 }
+
+function run() {
+  table.map(r => r[0]).forEach(sha1);
+}
+
+function time(func) {
+  const n = 1000;
+  const t = Date.now();
+  Array(n)
+    .fill(0)
+    .forEach(func);
+  return (Date.now() - t) / n;
+}
+
 // console.log(sha1("abc"));
+check() && console.log(time(run));
